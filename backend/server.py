@@ -1,72 +1,90 @@
-from fastapi import FastAPI, APIRouter
+from fastapi import FastAPI, APIRouter, HTTPException
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
-from motor.motor_asyncio import AsyncIOMotorClient
 import os
 import logging
-from pathlib import Path
-from pydantic import BaseModel, Field, ConfigDict
-from typing import List
 import uuid
-from datetime import datetime, timezone
-
+from pathlib import Path
+from pydantic import BaseModel, Field
+from typing import List, Optional
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
 
-# MongoDB connection
-mongo_url = os.environ['MONGO_URL']
-client = AsyncIOMotorClient(mongo_url)
-db = client[os.environ['DB_NAME']]
+from emergentintegrations.llm.chat import LlmChat, UserMessage  # noqa: E402
 
-# Create the main app without a prefix
+EMERGENT_LLM_KEY = os.environ.get("EMERGENT_LLM_KEY")
+
 app = FastAPI()
-
-# Create a router with the /api prefix
 api_router = APIRouter(prefix="/api")
 
 
-# Define Models
-class StatusCheck(BaseModel):
-    model_config = ConfigDict(extra="ignore")  # Ignore MongoDB's _id field
-    
-    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    client_name: str
-    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+class ChatHistoryItem(BaseModel):
+    role: str
+    content: str
 
-class StatusCheckCreate(BaseModel):
-    client_name: str
 
-# Add your routes to the router instead of directly to app
+class AIChatRequest(BaseModel):
+    message: str
+    system_context: Optional[str] = None
+    history: List[ChatHistoryItem] = Field(default_factory=list)
+    session_id: Optional[str] = None
+
+
+class AIChatResponse(BaseModel):
+    reply: str
+    session_id: str
+
+
 @api_router.get("/")
 async def root():
-    return {"message": "Hello World"}
+    return {"message": "Civic Accountability backend is running"}
 
-@api_router.post("/status", response_model=StatusCheck)
-async def create_status_check(input: StatusCheckCreate):
-    status_dict = input.model_dump()
-    status_obj = StatusCheck(**status_dict)
-    
-    # Convert to dict and serialize datetime to ISO string for MongoDB
-    doc = status_obj.model_dump()
-    doc['timestamp'] = doc['timestamp'].isoformat()
-    
-    _ = await db.status_checks.insert_one(doc)
-    return status_obj
 
-@api_router.get("/status", response_model=List[StatusCheck])
-async def get_status_checks():
-    # Exclude MongoDB's _id field from the query results
-    status_checks = await db.status_checks.find({}, {"_id": 0}).to_list(1000)
-    
-    # Convert ISO string timestamps back to datetime objects
-    for check in status_checks:
-        if isinstance(check['timestamp'], str):
-            check['timestamp'] = datetime.fromisoformat(check['timestamp'])
-    
-    return status_checks
+@api_router.get("/health")
+async def health():
+    return {"status": "ok", "llm_key_configured": bool(EMERGENT_LLM_KEY)}
 
-# Include the router in the main app
+
+@api_router.post("/ai/chat", response_model=AIChatResponse)
+async def ai_chat(req: AIChatRequest):
+    if not EMERGENT_LLM_KEY:
+        raise HTTPException(status_code=500, detail="EMERGENT_LLM_KEY not configured")
+
+    session_id = req.session_id or str(uuid.uuid4())
+    system_message = req.system_context or (
+        "You are an AI assistant for AP Civic Tracker, a civic accountability platform "
+        "covering all 175 constituencies in Andhra Pradesh, India. Help citizens understand "
+        "MLA performance, government schemes, public spending, projects, and promises. "
+        "Be conversational, empathetic, and fact-based. Use rupees (INR) for currency. "
+        "Keep answers under 150 words."
+    )
+
+    chat = LlmChat(
+        api_key=EMERGENT_LLM_KEY,
+        session_id=session_id,
+        system_message=system_message,
+    ).with_model("anthropic", "claude-sonnet-4-5-20250929")
+
+    # Replay history so the model has context (library tracks per-session, but we use fresh
+    # session for each request to ensure stateless behavior).
+    for item in req.history[-6:]:
+        if item.role == "user":
+            await chat.send_message(UserMessage(text=item.content))
+        # assistant messages can't be sent through the lib in this minimal flow; the
+        # library auto-appends its own replies. So we only replay user prompts so the
+        # context window contains them. For better fidelity we let the latest message
+        # carry the actual question.
+
+    try:
+        reply = await chat.send_message(UserMessage(text=req.message))
+    except Exception as e:
+        logger.exception("AI chat error")
+        raise HTTPException(status_code=502, detail=f"LLM error: {e}")
+
+    return AIChatResponse(reply=str(reply), session_id=session_id)
+
+
 app.include_router(api_router)
 
 app.add_middleware(
@@ -77,13 +95,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Configure logging
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
 )
 logger = logging.getLogger(__name__)
-
-@app.on_event("shutdown")
-async def shutdown_db_client():
-    client.close()
