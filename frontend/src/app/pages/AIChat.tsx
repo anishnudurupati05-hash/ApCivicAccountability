@@ -110,39 +110,6 @@ export function AIChat() {
         .slice(-8)
         .map(m => ({ role: m.role as "user" | "assistant", content: m.content }));
 
-      // Build constituency-aware system context locally so the LLM has data
-      let systemContext: string | undefined;
-      if (constituency && mlaCache) {
-        const totalBudget = (mlaCache.projects ?? []).reduce((s: number, p: any) => s + (p.allocated_amount || 0), 0);
-        const totalSpent = (mlaCache.projects ?? []).reduce((s: number, p: any) => s + (p.spent_amount || 0), 0);
-        const completed = (mlaCache.projects ?? []).filter((p: any) => p.status === "Completed").length;
-        const delayed = (mlaCache.projects ?? []).filter((p: any) => p.status === "Delayed").length;
-        const efficiency = totalBudget > 0 ? Math.round((totalSpent / totalBudget) * 100) : 0;
-        const projectExamples = (mlaCache.projects ?? []).slice(0, 5).map((p: any) =>
-          `${p.name} — ${p.status} (${Math.round((p.spent_amount / Math.max(p.allocated_amount, 1)) * 100)}% spent)`
-        ).join("; ");
-        const newsHeadlines = (mlaCache.news ?? []).slice(0, 5).map((n: any) => `"${n.title}" (${n.sentiment})`).join("; ");
-        const promiseSummary = (mlaCache.promises ?? []).slice(0, 5).map((p: any) =>
-          `${p.description} [${p.status || "Pending"}]`
-        ).join("; ");
-
-        systemContext = `You are an AI assistant for AP Civic Tracker, a civic accountability platform for Andhra Pradesh, India.
-
-CONSTITUENCY CONTEXT — ${mlaCache.constituency}:
-- MLA: ${mlaCache.name} (${mlaCache.party}), ${mlaCache.district} District
-- Total Projects: ${(mlaCache.projects ?? []).length} (${completed} completed, ${delayed} delayed)
-- Budget Allocated: ₹${(totalBudget / 10000000).toFixed(1)} Cr | Spent: ₹${(totalSpent / 10000000).toFixed(1)} Cr | Efficiency: ${efficiency}%
-- Score: ${mlaCache.score}/200 | Rank: ${mlaCache.rank ?? "N/A"}/175
-
-Recent News Headlines: ${newsHeadlines}
-
-Party Promises (${mlaCache.party}): ${promiseSummary}
-
-Project Examples: ${projectExamples}
-
-Answer questions about this constituency clearly and helpfully. Connect questions about roads, water, health and education to the actual data above. Be conversational, empathetic, and fact-based. Use ₹ for currency. Keep answers under 150 words.`;
-      }
-
       const backendUrl = (import.meta as any).env.VITE_BACKEND_URL || "";
       const res = await fetch(`${backendUrl}/api/ai/chat`, {
         method: "POST",
@@ -150,7 +117,7 @@ Answer questions about this constituency clearly and helpfully. Connect question
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           message: text,
-          system_context: systemContext,
+          constituency: constituency || undefined,
           history,
         }),
       });

@@ -276,6 +276,26 @@ export function TaxInArea() {
       .catch(err => { setError(err.message); setLoading(false); });
   }, [constituency]);
 
+  // Replace Supabase-generated aiInsight with our local Claude/OpenAI-backed one
+  useEffect(() => {
+    if (!constituency) return;
+    const backendUrl = (import.meta as any).env.VITE_BACKEND_URL || "";
+    let cancelled = false;
+    fetch(`${backendUrl}/api/ai/tax-insight`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ constituency }),
+    })
+      .then(r => r.ok ? r.json() : null)
+      .then(j => {
+        if (!cancelled && j?.insight) {
+          setData((prev: any) => prev ? { ...prev, aiInsight: j.insight } : prev);
+        }
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [constituency]);
+
   const selectConstituency = (name: string) => { setConstituency(name); setShowSearch(false); setSearchQuery(""); };
   const partyBg = data ? (PARTY_BG[data.mla.party] || "bg-slate-100 text-slate-700 border-slate-300") : "";
 
@@ -292,12 +312,14 @@ export function TaxInArea() {
       <div className="max-w-5xl mx-auto space-y-6">
 
         {/* ── Hero Header ─────────────────────────────────────────────────── */}
-        <div className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-indigo-600 via-violet-600 to-purple-700 px-6 py-6 shadow-xl">
-          <div className="absolute inset-0 opacity-10 pointer-events-none">
-            {Array.from({ length: 18 }).map((_, i) => (
-              <div key={i} className="absolute rounded-full bg-white"
-                style={{ width: `${20 + i * 14}px`, height: `${20 + i * 14}px`, top: `${Math.sin(i * 0.9) * 70 + 30}%`, left: `${(i / 18) * 115 - 5}%`, opacity: 0.25 }} />
-            ))}
+        <div className="relative rounded-2xl bg-gradient-to-r from-indigo-600 via-violet-600 to-purple-700 px-6 py-6 shadow-xl">
+          <div className="absolute inset-0 overflow-hidden rounded-2xl pointer-events-none">
+            <div className="absolute inset-0 opacity-10">
+              {Array.from({ length: 18 }).map((_, i) => (
+                <div key={i} className="absolute rounded-full bg-white"
+                  style={{ width: `${20 + i * 14}px`, height: `${20 + i * 14}px`, top: `${Math.sin(i * 0.9) * 70 + 30}%`, left: `${(i / 18) * 115 - 5}%`, opacity: 0.25 }} />
+              ))}
+            </div>
           </div>
           <div className="relative flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
             <div>
@@ -312,8 +334,9 @@ export function TaxInArea() {
               <p className="text-indigo-200 text-sm mt-1">Where your money comes from · and where it goes</p>
             </div>
             {/* Picker */}
-            <div className="relative z-10">
+            <div className="relative z-50">
               <button onClick={() => setShowSearch(!showSearch)}
+                data-testid="constituency-picker-trigger"
                 className="flex items-center gap-2 bg-white/15 hover:bg-white/25 border border-white/30 rounded-xl px-4 py-2.5 text-white text-sm font-medium transition-all min-w-[210px] justify-between">
                 <div className="flex items-center gap-2">
                   <MapPin className="w-4 h-4 text-indigo-200" />
@@ -322,24 +345,35 @@ export function TaxInArea() {
                 <ChevronDown className={`w-4 h-4 text-indigo-200 flex-shrink-0 transition-transform ${showSearch ? "rotate-180" : ""}`} />
               </button>
               {showSearch && (
-                <div className="absolute top-full right-0 mt-1 w-72 bg-white rounded-xl shadow-2xl border border-slate-200 overflow-hidden">
-                  <div className="p-2 border-b border-slate-100">
-                    <div className="flex items-center gap-2 bg-slate-50 rounded-lg px-3 py-2">
-                      <Search className="w-4 h-4 text-slate-400" />
-                      <input autoFocus type="text" placeholder="Search constituency..." value={searchQuery}
-                        onChange={e => setSearchQuery(e.target.value)} className="bg-transparent flex-1 text-sm text-slate-700 outline-none" />
+                <>
+                  <div
+                    className="fixed inset-0 z-40"
+                    onClick={() => setShowSearch(false)}
+                    data-testid="constituency-picker-backdrop"
+                  />
+                  <div
+                    className="absolute top-full right-0 mt-1 w-72 bg-white rounded-xl shadow-2xl border border-slate-200 overflow-hidden z-50"
+                    data-testid="constituency-picker-dropdown"
+                  >
+                    <div className="p-2 border-b border-slate-100">
+                      <div className="flex items-center gap-2 bg-slate-50 rounded-lg px-3 py-2">
+                        <Search className="w-4 h-4 text-slate-400" />
+                        <input autoFocus type="text" placeholder="Search constituency..." value={searchQuery}
+                          onChange={e => setSearchQuery(e.target.value)} className="bg-transparent flex-1 text-sm text-slate-700 outline-none" />
+                      </div>
+                    </div>
+                    <div className="max-h-60 overflow-y-auto">
+                      {filtered.slice(0, 40).map(c => (
+                        <button key={c} onClick={() => selectConstituency(c)}
+                          data-testid={`constituency-option-${c.replace(/\s+/g, "-").toLowerCase()}`}
+                          className={`w-full text-left px-3 py-2.5 text-sm hover:bg-indigo-50 transition-colors ${constituency === c ? "bg-indigo-50 text-indigo-700 font-semibold" : "text-slate-700"}`}>
+                          {c}
+                        </button>
+                      ))}
+                      {filtered.length === 0 && <div className="px-3 py-4 text-sm text-slate-400 text-center">No results</div>}
                     </div>
                   </div>
-                  <div className="max-h-60 overflow-y-auto">
-                    {filtered.slice(0, 40).map(c => (
-                      <button key={c} onClick={() => selectConstituency(c)}
-                        className={`w-full text-left px-3 py-2.5 text-sm hover:bg-indigo-50 transition-colors ${constituency === c ? "bg-indigo-50 text-indigo-700 font-semibold" : "text-slate-700"}`}>
-                        {c}
-                      </button>
-                    ))}
-                    {filtered.length === 0 && <div className="px-3 py-4 text-sm text-slate-400 text-center">No results</div>}
-                  </div>
-                </div>
+                </>
               )}
             </div>
           </div>

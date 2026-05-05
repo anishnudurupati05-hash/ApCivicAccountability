@@ -1,6 +1,7 @@
 import { useEffect, useState, useRef } from "react";
 import { api, SpeakUpIssue } from "../lib/api";
 import { useLanguage } from "../contexts/LanguageContext";
+import { TagMinister } from "../components/TagMinister";
 import {
   Megaphone, ThumbsUp, MessageCircle, Flame, Heart, AlertTriangle,
   Plus, X, ChevronDown, ChevronUp, Send, MapPin, Clock,
@@ -233,6 +234,18 @@ function IssueCard({ issue, onUpvote, onReact, onComment, localUpvoted, localRea
             {showComments ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
           </button>
         </div>
+      </div>
+
+      {/* Tag a Minister accountability strip */}
+      <div className="px-4 pb-3">
+        <TagMinister
+          issueId={issue.id}
+          title={issue.title}
+          constituency={issue.constituency}
+          category={issue.category}
+          description={issue.description}
+          upvotes={issue.upvotes}
+        />
       </div>
 
       {/* Comments Section */}

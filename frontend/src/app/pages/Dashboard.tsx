@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { api, DashboardStats, formatCurrency } from "../lib/api";
 import { Link } from "react-router";
 import { useLanguage } from "../contexts/LanguageContext";
+import { KeyOfficeHolders } from "../components/KeyOfficeHolders";
 import {
   PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, CartesianGrid,
   Tooltip, ResponsiveContainer, Legend
@@ -128,6 +129,9 @@ export function Dashboard() {
           <span>175 {t.mlaList.constituency.split(" ")[0]}s</span>
         </div>
       </div>
+
+      {/* Key Office Holders Banner */}
+      <KeyOfficeHolders />
 
       {/* Stats Grid */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
